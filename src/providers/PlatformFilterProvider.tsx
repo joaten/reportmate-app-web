@@ -64,10 +64,11 @@ interface PlatformFilterProviderProps {
  * from the dashboard insights API may say `macOS` / `Windows`, which are
  * accepted and rewritten to the short form.
  */
-export function platformFromParam(value: string | null): 'macOS' | 'Windows' | null {
+export function platformFromParam(value: string | null): Platform | null {
   const v = (value || '').trim().toLowerCase()
   if (v === 'mac' || v === 'macos') return 'macOS'
   if (v === 'win' || v === 'windows') return 'Windows'
+  if (v === 'all') return 'all'
   return null
 }
 
@@ -105,7 +106,7 @@ export function PlatformFilterProvider({ children, defaultPlatform = 'all' }: Pl
     if (nextPlatform) {
       setPlatformFilterState(nextPlatform)
       localStorage.setItem(STORAGE_KEY, nextPlatform)
-      const short = nextPlatform === 'macOS' ? 'mac' : 'win'
+      const short = nextPlatform === 'all' ? 'all' : nextPlatform === 'macOS' ? 'mac' : 'win'
       if (urlPlatform !== short) {
         const params = new URLSearchParams(searchParams.toString())
         params.set('platform', short)

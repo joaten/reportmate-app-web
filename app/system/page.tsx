@@ -4,6 +4,8 @@ export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useRef, useState, Suspense } from "react"
 import Link from "next/link"
+import { SystemViewSwitch } from "@/src/components/system/SystemViewSwitch"
+import { ServicesReport } from "@/src/components/system/ServicesReport"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import { formatRelativeTime } from "@/src/lib/time"
 import { OSVersionPieChart } from "@/src/lib/modules/graphs/OSVersionPieChart"
@@ -928,7 +930,7 @@ function SystemPageContent() {
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Operating System Information</h2>
+                <SystemViewSwitch current="os" />
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                   OS versions, activation status, and system uptime {searchFilteredSystems.length} devices
                 </p>
@@ -1520,10 +1522,15 @@ function SystemPageContent() {
   )
 }
 
+function SystemTabs() {
+  const searchParams = useSearchParams()
+  return searchParams.get('tab') === 'services' ? <ServicesReport /> : <SystemPageContent />
+}
+
 export default function SystemPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-black animate-pulse"></div>}>
-      <SystemPageContent />
+      <SystemTabs />
     </Suspense>
   )
 }

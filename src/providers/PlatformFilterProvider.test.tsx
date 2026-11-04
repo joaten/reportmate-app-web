@@ -114,7 +114,7 @@ describe('platformFromParam', () => {
     expect(platformFromParam('macOS')).toBe('macOS')
     expect(platformFromParam('win')).toBe('Windows')
     expect(platformFromParam('Windows')).toBe('Windows')
-    expect(platformFromParam('all')).toBeNull()
+    expect(platformFromParam('all')).toBe('all')
     expect(platformFromParam(null)).toBeNull()
   })
 })
