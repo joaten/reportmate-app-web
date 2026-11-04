@@ -15,6 +15,7 @@ export function ServiceSelectionCloud({ label, options, selected, onToggle, onSe
   const [search, setSearch] = useState("")
   const query = search.toLowerCase().trim()
   const visible = options.filter(o => !query || `${o.label} ${o.value}`.toLowerCase().includes(query))
+  const displayed = visible.slice(0, 150)
   const selectResults = [...new Set([...selected, ...visible.map(o => o.value)])]
   return (
     <section aria-label={label}>
@@ -27,9 +28,10 @@ export function ServiceSelectionCloud({ label, options, selected, onToggle, onSe
       </div>
       <input type="search" aria-label={`Search ${label.toLowerCase()}`} placeholder={`Search ${label.toLowerCase()}…`} value={search} onChange={e => setSearch(e.target.value)}
         className="w-full mb-2 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white" />
+      {!loading && visible.length > displayed.length && <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Showing {displayed.length} of {visible.length.toLocaleString()} choices. Search to narrow the list.</p>}
       <div className="min-h-24 max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-800">
         <div className="flex flex-wrap gap-1">
-          {loading ? <span role="status" className="text-sm text-gray-500 p-2">Loading available {label.toLowerCase()}…</span> : visible.map(option => {
+          {loading ? <span role="status" className="text-sm text-gray-500 p-2">Loading available {label.toLowerCase()}…</span> : displayed.map(option => {
             const active = selected.includes(option.value)
             return <button type="button" key={option.value} aria-pressed={active} title={option.value} onClick={() => onToggle(option.value)}
               className={`px-2 py-1 text-xs rounded-full border transition-colors ${active
