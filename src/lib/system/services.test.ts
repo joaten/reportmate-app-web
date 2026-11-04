@@ -7,8 +7,9 @@ it('preserves service, version, inventory, freshness and device scope in a share
   expect(query.get('service')).toBe('service%_name')
   expect(query.get('versions')).toBe('1.2,2.0')
   expect(query.get('platform')).toBe('Windows')
-  expect(query.get('limit')).toBe('50')
-  for (const key of ['application', 'states', 'freshness', 'maxAgeHours', 'inventoryStates', 'catalogs', 'rooms', 'search', 'includeArchived', 'offset']) {
+  expect(query.get('limit')).toBe('500')
+  expect(query.has('offset')).toBe(false)
+  for (const key of ['application', 'states', 'freshness', 'maxAgeHours', 'inventoryStates', 'catalogs', 'rooms', 'search', 'includeArchived']) {
     expect(query.get(key)).toBe(params.get(key))
   }
   expect(query.has('tab')).toBe(false)

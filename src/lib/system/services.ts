@@ -104,7 +104,8 @@ export function servicesApiQuery(params: URLSearchParams, platform: string): str
     if (value) query.set(key, value)
   }
   query.set("platform", platform)
-  query.set("limit", "50")
+  query.delete("offset")
+  query.set("limit", "500")
   return query.toString()
 }
 
@@ -127,4 +128,11 @@ export function stateLabel(value: string): string {
 export function inventoryLabel(value: string | null): string {
   return value === "checked_out" ? "Checked out" : value === "storage" ? "Storage"
     : value === "decommissioning" ? "Decommissioning" : "Unknown"
+}
+
+export function servicesPageQuery(query: string, offset = 0): string {
+  const params = new URLSearchParams(query)
+  params.set("offset", String(offset))
+  params.set("limit", "500")
+  return params.toString()
 }

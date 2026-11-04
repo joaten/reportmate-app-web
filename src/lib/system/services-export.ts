@@ -1,44 +1,5 @@
 import { csvRow } from "../csv"
-import { SERVICES_API, inventoryLabel, stateLabel, type ServiceDevice, type ServicesReport } from "./services"
-
-export function servicesExportQuery(query: string, offset = 0): string {
-  const params = new URLSearchParams(query)
-  params.set("offset", String(offset))
-  params.set("limit", "500")
-  return params.toString()
-}
-
-export async function collectServicesExport(
-  query: string,
-  signal: AbortSignal,
-  onProgress: (loaded: number, total: number) => void,
-): Promise<{ devices: ServiceDevice[]; generatedAt: string }> {
-  const devices: ServiceDevice[] = []
-  const serials = new Set<string>()
-  let total: number | null = null
-  let generatedAt = ""
-  do {
-    const response = await fetch(`${SERVICES_API}?${servicesExportQuery(query, devices.length)}`, { cache: "no-store", signal })
-    if (!response.ok) throw new Error("The report could not be exported. Please retry.")
-    const page: ServicesReport = await response.json()
-    if (!Array.isArray(page.devices) || !Number.isInteger(page.total) || page.total < 0 || page.queryRequired ||
-        page.offset !== devices.length || (total !== null && page.total !== total)) {
-      throw new Error("The report changed during export. Please retry.")
-    }
-    total = page.total
-    if (!generatedAt) generatedAt = page.generatedAt
-    if (page.devices.length === 0 && devices.length < total) throw new Error("The export returned an incomplete page. Please retry.")
-    for (const device of page.devices) {
-      if (!device.serialNumber || serials.has(device.serialNumber)) throw new Error("The report changed during export. Please retry.")
-      serials.add(device.serialNumber)
-      devices.push(device)
-    }
-    if (devices.length > total) throw new Error("The report changed during export. Please retry.")
-    onProgress(devices.length, total)
-  } while (devices.length < total)
-  signal.throwIfAborted()
-  return { devices, generatedAt }
-}
+import { inventoryLabel, stateLabel, type ServiceDevice } from "./services"
 
 export function servicesCsv(devices: ServiceDevice[], generatedAt: string, reportUrl: string): string {
   const headers = [

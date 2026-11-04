@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { usePlatformFilterSafe } from "../../providers/PlatformFilterProvider"
@@ -9,14 +9,14 @@ import { SystemViewSwitch } from "./SystemViewSwitch"
 import { ServiceSelectionCloud } from "./ServiceSelectionCloud"
 import { peekCached, rememberCached, trackedFetch } from "../../lib/data-cache"
 import { formatExactTime, formatRelativeTime } from "../../lib/time"
-import { collectServicesExport, servicesCsv } from "../../lib/system/services-export"
+import { servicesCsv } from "../../lib/system/services-export"
+import { fetchServicesReport } from "../../lib/system/services-request"
 import {
-  SERVICES_API, SERVICE_OPTIONS_API, SERVICE_PARAMS, SERVICE_STATES, inventoryLabel, listParam,
+  SERVICE_OPTIONS_API, SERVICE_PARAMS, SERVICE_STATES, inventoryLabel, listParam,
   selectedApplicationNames, selectedServiceNames, serviceOptionsQuery, servicesApiQuery,
   servicesUrlQuery, stateLabel, type ServiceState, type ServiceCatalog, type ServicesReport as Report,
 } from "../../lib/system/services"
 
-const button = "rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40"
 const actionButton = "px-4 py-2 text-sm rounded-lg transition-colors whitespace-nowrap font-medium flex items-center gap-2 disabled:opacity-50"
 const secondaryAction = `${actionButton} bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white`
 const emptyOptions = { usages: [], catalogs: [], areas: [], fleets: [], locations: [], rooms: [], inventoryStates: [] }
@@ -63,9 +63,7 @@ export function ServicesReport() {
   const [expanded, setExpanded] = useState(!hasQuery)
   const [appPickerOpen, setAppPickerOpen] = useState(hasApplication)
   const [copied, setCopied] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [exportProgress, setExportProgress] = useState("")
-  const exportController = useRef<AbortController | null>(null)
+  const [loadProgress, setLoadProgress] = useState("")
   const searchValue = params.get("search") || ""
   const [deviceSearch, setDeviceSearch] = useState(searchValue)
   const serviceNames = selectedServiceNames(params, catalog)
@@ -75,15 +73,6 @@ export function ServicesReport() {
     .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
   const startupOptions = [...new Set((catalog?.services || []).filter(s => serviceNames.includes(s.name)).flatMap(s => s.startups))].sort()
   const options = catalog?.options || emptyOptions
-
-  useEffect(() => {
-    setExporting(false)
-    setExportProgress("")
-    return () => {
-      exportController.current?.abort()
-      exportController.current = null
-    }
-  }, [query, reload])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -110,15 +99,15 @@ export function ServicesReport() {
   useEffect(() => {
     const controller = new AbortController()
     setLoading(hasQuery)
+    setLoadProgress("")
     setError(null)
     setData(null)
     if (!hasQuery) return () => controller.abort()
     const run = async () => {
       try {
-        const response = await trackedFetch(`${SERVICES_API}?${query}`, { cache: "no-store", signal: controller.signal })
-        const body = await response.json()
-        if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "The services report could not be loaded.")
-        if (!Array.isArray(body.devices) || typeof body.total !== "number") throw new Error("The server returned an incomplete services report.")
+        const body = await fetchServicesReport(query, controller.signal, (loaded, total) => {
+          if (!controller.signal.aborted) setLoadProgress(`${loaded.toLocaleString()} of ${total.toLocaleString()} devices`)
+        })
         if (!controller.signal.aborted) setData(body)
       } catch (err) {
         if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Services report unavailable")
@@ -159,26 +148,19 @@ export function ServicesReport() {
     try {
       const url = new URL(window.location.href)
       url.searchParams.set("platform", platformFilter === "Windows" ? "win" : platformFilter === "macOS" ? "mac" : "all")
+      url.searchParams.delete("offset")
       await navigator.clipboard.writeText(url.toString())
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch { setError("Could not copy the link. Copy this page's address instead.") }
   }
-  const exportCsv = async () => {
-    const controller = new AbortController()
-    exportController.current = controller
-    setExporting(true)
-    setExportProgress("")
-    setError(null)
+  const exportCsv = () => {
+    if (!data) return
     try {
-      const result = await collectServicesExport(query, controller.signal, (loaded, total) => {
-        if (!controller.signal.aborted) setExportProgress(`${loaded.toLocaleString()}/${total.toLocaleString()}`)
-      })
-      controller.signal.throwIfAborted()
       const reportUrl = new URL(window.location.href)
       reportUrl.searchParams.set("platform", platformFilter === "Windows" ? "win" : platformFilter === "macOS" ? "mac" : "all")
       reportUrl.searchParams.delete("offset")
-      const blob = new Blob(["\uFEFF", servicesCsv(result.devices, result.generatedAt, reportUrl.toString())], { type: "text/csv;charset=utf-8;" })
+      const blob = new Blob(["\uFEFF", servicesCsv(data.devices, data.generatedAt, reportUrl.toString())], { type: "text/csv;charset=utf-8;" })
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
@@ -187,14 +169,8 @@ export function ServicesReport() {
       link.click()
       link.remove()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch (err) {
-      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "The report could not be exported.")
-    } finally {
-      if (exportController.current === controller) {
-        exportController.current = null
-        setExporting(false)
-        setExportProgress("")
-      }
+    } catch {
+      setError("The report could not be exported. Please retry.")
     }
   }
   const activeCount = serviceNames.length + applicationNames.length + selectedVersions.length +
@@ -225,9 +201,9 @@ export function ServicesReport() {
                 <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 Refresh
               </button>
-              {!loading && data && data.total > 0 && <button type="button" onClick={exportCsv} disabled={exporting} title="Export all matching devices across every page" className={`${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white`}>
+              {!loading && data && data.total > 0 && <button type="button" onClick={exportCsv} title="Export all matching devices in this report" className={`${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white`}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                <span aria-live="polite">{exporting ? `Exporting${exportProgress ? ` ${exportProgress}` : "…"}` : "Export CSV"}</span>
+                Export CSV
               </button>}
             </div>
           </div>
@@ -267,7 +243,7 @@ export function ServicesReport() {
               <div className="flex flex-wrap gap-2" aria-label="Service state filters"><Choice active={!params.get("states")} onClick={() => update({ states: null })}>All states</Choice>{SERVICE_STATES.map(state => <Choice key={state} active={listParam(params, "states").includes(state)} onClick={() => toggle("states", state)}>{stateLabel(state)}{data ? ` ${data.summary[state] || 0}` : ""}</Choice>)}</div>
             </div>}
             {!hasQuery ? <div className="px-6 py-12 text-center text-gray-500 dark:text-gray-400"><p className="font-medium">Choose services from Selections to build your report.</p><p className="text-sm mt-2">Pick the collected services you want to compare. Results update as you select.</p></div>
-              : loading ? <div role="status" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">Loading services report…</div>
+              : loading ? <div role="status" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">Loading services report…{loadProgress && ` ${loadProgress}`}</div>
               : data && <div className="overflow-x-auto">
 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-900/50"><tr>
@@ -309,7 +285,6 @@ export function ServicesReport() {
           </div>
           <div className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-gray-500 dark:text-gray-400">Last collected local state; a running service does not prove vendor connectivity.</p>
-            {hasQuery && data && <div className="flex items-center gap-3"><span className="text-xs text-gray-500 dark:text-gray-400">{data.devices.length ? data.offset + 1 : 0}–{data.devices.length ? data.offset + data.devices.length : 0} of {data.total}</span><button type="button" disabled={loading || data.offset === 0} className={button} onClick={() => update({ offset: String(Math.max(0, data.offset - data.limit)) })}>Previous</button><button type="button" disabled={loading || data.offset + data.limit >= data.total} className={button} onClick={() => update({ offset: String(data.offset + data.limit) })}>Next</button></div>}
           </div>
         </div>
       </div>
