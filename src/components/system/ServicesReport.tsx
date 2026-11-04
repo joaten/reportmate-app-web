@@ -1,46 +1,39 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
-import Link from "next/link"
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { usePlatformFilterSafe } from "../../providers/PlatformFilterProvider"
 import DeviceFilters from "../shared/DeviceFilters"
 import { SystemViewSwitch } from "./SystemViewSwitch"
 import { ServiceSelectionCloud } from "./ServiceSelectionCloud"
 import { peekCached, rememberCached, trackedFetch } from "../../lib/data-cache"
-import { formatExactTime, formatRelativeTime } from "../../lib/time"
 import { servicesCsv } from "../../lib/system/services-export"
 import { fetchServicesReport } from "../../lib/system/services-request"
 import {
   SERVICE_OPTIONS_API, SERVICE_PARAMS, SERVICE_STATES, inventoryLabel, listParam,
   selectedApplicationNames, selectedServiceNames, serviceOptionsQuery, servicesApiQuery,
-  servicesUrlQuery, stateLabel, type ServiceState, type ServiceCatalog, type ServicesReport as Report,
+  servicesUrlQuery, stateLabel, type ServiceCatalog, type ServicesReport as Report,
 } from "../../lib/system/services"
+
+import { ServicesTable } from "./ServicesTable"
+import {
+  CHECKIN_CHOICES, EVIDENCE_CHOICES, SERVICE_COLUMNS, SERVICE_VIEW_PARAMS, readServicesView, servicesViewRows,
+  type ServiceColumn,
+} from "../../lib/system/services-view"
 
 const actionButton = "px-4 py-2 text-sm rounded-lg transition-colors whitespace-nowrap font-medium flex items-center gap-2 disabled:opacity-50"
 const secondaryAction = `${actionButton} bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white`
 const emptyOptions = { usages: [], catalogs: [], areas: [], fleets: [], locations: [], rooms: [], inventoryStates: [] }
 
-function When({ value }: { value: string | null }) {
-  return value ? <time dateTime={value} title={formatExactTime(value)}>{formatRelativeTime(value)}</time> : <span className="text-gray-400">Unknown</span>
-}
-
-function Badge({ state }: { state: ServiceState }) {
-  const color = state === "running" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-    : state === "stopped" || state === "missing" ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
-    : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
-  return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>{stateLabel(state)}</span>
-}
-
-function Choice({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return <button type="button" aria-pressed={active} onClick={onClick}
+function Choice({ active, onClick, children, disabled }: { active: boolean; onClick: () => void; children: ReactNode; disabled?: boolean }) {
+  return <button type="button" aria-pressed={active} onClick={onClick} disabled={disabled}
     className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${active
       ? "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-700"
       : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-600"}`}>{children}</button>
 }
 
 function Choices({ label, children }: { label: string; children: ReactNode }) {
-  return <div><h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">{label}</h3><div className="flex flex-wrap gap-2">{children}</div></div>
+  return <div role="group" aria-label={label}><h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">{label}</h3><div className="flex flex-wrap gap-2">{children}</div></div>
 }
 
 export function ServicesReport() {
@@ -53,7 +46,10 @@ export function ServicesReport() {
   const optionsKey = `${SERVICE_OPTIONS_API}?${serviceOptionsQuery(params, platformFilter)}`
   const hasQuery = !!(params.get("serviceNames") || params.get("service"))?.trim()
   const hasApplication = !!(params.get("applicationNames") || params.get("application"))?.trim()
+  const [pending, startTransition] = useTransition()
   const [data, setData] = useState<Report | null>(null)
+  const view = useMemo(() => readServicesView(new URLSearchParams(current), hasApplication), [current, hasApplication])
+  const rows = useMemo(() => data ? servicesViewRows(data.devices, data.generatedAt, view) : [], [data, view])
   const [catalog, setCatalog] = useState<ServiceCatalog | null>(null)
   const [loading, setLoading] = useState(hasQuery)
   const [optionsLoading, setOptionsLoading] = useState(true)
@@ -130,7 +126,7 @@ export function ServicesReport() {
     const next = servicesUrlQuery(current, patch)
     const nextParams = new URLSearchParams(next)
     if (!nextParams.get("serviceNames") && !nextParams.get("service")) setExpanded(true)
-    router.push(`/system?${next}`, { scroll: false })
+    startTransition(() => router.push(`/system?${next}`, { scroll: false }))
   }
   const toggle = (key: string, value: string) => {
     const selected = listParam(params, key)
@@ -142,7 +138,12 @@ export function ServicesReport() {
   const toggleApplication = (value: string) => chooseApplications(applicationNames.includes(value) ? applicationNames.filter(v => v !== value) : [...applicationNames, value])
   const clearAll = () => {
     setDeviceSearch("")
-    update(Object.fromEntries(SERVICE_PARAMS.map(key => [key, null])))
+    update(Object.fromEntries([...SERVICE_PARAMS, ...SERVICE_VIEW_PARAMS].map(key => [key, null])))
+  }
+  const sortColumn = (column: ServiceColumn) => update({ sort: column, direction: view.sort === column && view.direction === "asc" ? "desc" : "asc" })
+  const toggleColumn = (column: ServiceColumn) => {
+    const columns = view.columns.includes(column) ? view.columns.filter(key => key !== column) : [...view.columns, column]
+    update({ columns: columns.join(","), ...(columns.includes(view.sort) ? {} : { sort: null, direction: null }) })
   }
   const copyLink = async () => {
     try {
@@ -160,7 +161,7 @@ export function ServicesReport() {
       const reportUrl = new URL(window.location.href)
       reportUrl.searchParams.set("platform", platformFilter === "Windows" ? "win" : platformFilter === "macOS" ? "mac" : "all")
       reportUrl.searchParams.delete("offset")
-      const blob = new Blob(["\uFEFF", servicesCsv(data.devices, data.generatedAt, reportUrl.toString())], { type: "text/csv;charset=utf-8;" })
+      const blob = new Blob(["\uFEFF", servicesCsv(rows, data.generatedAt, reportUrl.toString(), view.checkinAgeHours)], { type: "text/csv;charset=utf-8;" })
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
@@ -175,7 +176,7 @@ export function ServicesReport() {
   }
   const activeCount = serviceNames.length + applicationNames.length + selectedVersions.length +
     listParam(params, "states").length + listParam(params, "startups").length + listParam(params, "inventoryStates").length +
-    (params.has("freshness") ? 1 : 0) + (params.has("maxAgeHours") ? 1 : 0) + (params.has("includeArchived") ? 1 : 0)
+    (params.has("freshness") ? 1 : 0) + (params.has("maxAgeHours") ? 1 : 0) + (params.has("includeArchived") ? 1 : 0) + (view.evidence !== "all" ? 1 : 0) + (view.checkin !== "all" ? 1 : 0)
   const age = params.get("maxAgeHours") || "24"
   const freshness = params.get("freshness") || "all"
   const chips = [
@@ -193,15 +194,15 @@ export function ServicesReport() {
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3">
             <div><SystemViewSwitch current="services" /><p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Service coverage and installed versions across devices.</p></div>
             <div className="flex flex-wrap items-center gap-3">
-              <button type="button" onClick={copyLink} title="Copy a shareable link to this exact report" className={copied ? `${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white` : secondaryAction}>
+              <button type="button" onClick={copyLink} disabled={pending} title="Copy a shareable link to this exact report" className={copied ? `${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white` : secondaryAction}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={copied ? "M5 13l4 4L19 7" : "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"} /></svg>
                 {copied ? "Link Copied" : "Copy Link"}
               </button>
-              <button type="button" onClick={() => setReload(n => n + 1)} disabled={loading} className={secondaryAction}>
+              <button type="button" onClick={() => setReload(n => n + 1)} disabled={loading || pending} className={secondaryAction}>
                 <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 Refresh
               </button>
-              {!loading && data && data.total > 0 && <button type="button" onClick={exportCsv} title="Export all matching devices in this report" className={`${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white`}>
+              {!loading && data && rows.length > 0 && <button type="button" onClick={exportCsv} disabled={pending} title="Export all matching devices in this report" className={`${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white`}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 Export CSV
               </button>}
@@ -223,13 +224,15 @@ export function ServicesReport() {
                   {(appPickerOpen || hasApplication) && <ServiceSelectionCloud label="Applications" options={(catalog?.applications || []).map(a => ({ value: a.name, label: a.name, devices: a.devices }))} selected={applicationNames} onToggle={toggleApplication} onSelect={chooseApplications} loading={optionsLoading} />}
                 </div>
                 {!appPickerOpen && !hasApplication && <button type="button" onClick={() => setAppPickerOpen(true)} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Add application versions</button>}
-                {hasApplication && <Choices label="Versions"><Choice active={selectedVersions.length === 0} onClick={() => update({ versions: null })}>All versions</Choice>{availableVersions.map(version => <Choice key={version} active={selectedVersions.includes(version)} onClick={() => toggle("versions", version)}>{version}</Choice>)}</Choices>}
+                {hasApplication && <Choices label="Versions"><Choice disabled={pending} active={selectedVersions.length === 0} onClick={() => update({ versions: null })}>All versions</Choice>{availableVersions.map(version => <Choice disabled={pending} key={version} active={selectedVersions.includes(version)} onClick={() => toggle("versions", version)}>{version}</Choice>)}</Choices>}
                 <div className="flex flex-wrap gap-x-8 gap-y-4">
-                  {startupOptions.length > 0 && <Choices label="Startup type"><Choice active={!params.get("startups")} onClick={() => update({ startups: null })}>All</Choice>{startupOptions.map(value => <Choice key={value} active={listParam(params, "startups").includes(value)} onClick={() => toggle("startups", value)}>{stateLabel(value)}</Choice>)}</Choices>}
-                  <Choices label="Collection age">{([['all', 'All'], ['fresh', 'Within maximum age'], ['stale', 'Older'], ['unknown', 'Unknown']] as const).map(([value, label]) => <Choice key={value} active={freshness === value} onClick={() => update({ freshness: value === "all" ? null : value })}>{label}</Choice>)}</Choices>
-                  <Choices label="Maximum collection age">{[...new Set(["24", "168", "720", age])].map(value => <Choice key={value} active={age === value} onClick={() => update({ maxAgeHours: value === "24" ? null : value })}>{value === "24" ? "24 hours" : value === "168" ? "7 days" : value === "720" ? "30 days" : `${value} hours`}</Choice>)}</Choices>
-                  <Choices label="Inventory state"><Choice active={!params.get("inventoryStates")} onClick={() => update({ inventoryStates: null })}>All</Choice>{options.inventoryStates.map(value => <Choice key={value} active={listParam(params, "inventoryStates").includes(value)} onClick={() => toggle("inventoryStates", value)}>{inventoryLabel(value)}</Choice>)}</Choices>
-                  <Choices label="Archive"><Choice active={params.get("includeArchived") === "true"} onClick={() => update({ includeArchived: params.get("includeArchived") === "true" ? null : "true" })}>Include archived</Choice></Choices>
+                  {startupOptions.length > 0 && <Choices label="Startup type"><Choice disabled={pending} active={!params.get("startups")} onClick={() => update({ startups: null })}>All</Choice>{startupOptions.map(value => <Choice disabled={pending} key={value} active={listParam(params, "startups").includes(value)} onClick={() => toggle("startups", value)}>{stateLabel(value)}</Choice>)}</Choices>}
+                  <Choices label="Service collection age">{([['all', 'All'], ['fresh', 'Within maximum age'], ['stale', 'Older'], ['unknown', 'Unknown']] as const).map(([value, label]) => <Choice disabled={pending} key={value} active={freshness === value} onClick={() => update({ freshness: value === "all" ? null : value })}>{label}</Choice>)}</Choices>
+                  <Choices label="Maximum service collection age">{[...new Set(["24", "168", "720", age])].map(value => <Choice disabled={pending} key={value} active={age === value} onClick={() => update({ maxAgeHours: value === "24" ? null : value })}>{value === "24" ? "24 hours" : value === "168" ? "7 days" : value === "720" ? "30 days" : `${value} hours`}</Choice>)}</Choices>
+                  <Choices label="Device check-in age">{CHECKIN_CHOICES.map(([value, label]) => <Choice disabled={pending} key={value} active={view.checkin === value} onClick={() => update({ checkin: value === "all" ? null : value })}>{label}</Choice>)}</Choices>
+                  <Choices label="Maximum check-in age">{[...new Set([24, 168, 720, view.checkinAgeHours])].map(value => <Choice disabled={pending} key={value} active={view.checkinAgeHours === value} onClick={() => update({ checkinAgeHours: value === 168 ? null : String(value) })}>{value === 24 ? "24 hours" : value === 168 ? "7 days" : value === 720 ? "30 days" : `${value} hours`}</Choice>)}</Choices>
+                  <Choices label="Inventory state"><Choice disabled={pending} active={!params.get("inventoryStates")} onClick={() => update({ inventoryStates: null })}>All</Choice>{options.inventoryStates.map(value => <Choice disabled={pending} key={value} active={listParam(params, "inventoryStates").includes(value)} onClick={() => toggle("inventoryStates", value)}>{inventoryLabel(value)}</Choice>)}</Choices>
+                  <Choices label="Archive"><Choice disabled={pending} active={params.get("includeArchived") === "true"} onClick={() => update({ includeArchived: params.get("includeArchived") === "true" ? null : "true" })}>Include archived</Choice></Choices>
                 </div>
               </div>
             </DeviceFilters>
@@ -239,52 +242,24 @@ export function ServicesReport() {
             </div>}
             {(error || optionsError) && <div role="alert" className="mx-6 my-4 p-3 text-sm text-red-800 dark:text-red-200 bg-red-50 dark:bg-red-900/20 rounded-lg">{error || optionsError}<button type="button" className="underline ml-2" onClick={() => setReload(n => n + 1)}>Retry</button></div>}
             {hasQuery && <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-gray-600 dark:text-gray-400">{loading ? "Updating report…" : data ? `${data.total.toLocaleString()} devices` : ""}</span><input type="search" aria-label="Search devices" placeholder="Search devices…" value={deviceSearch} onChange={e => setDeviceSearch(e.target.value)} className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-white" /></div>
-              <div className="flex flex-wrap gap-2" aria-label="Service state filters"><Choice active={!params.get("states")} onClick={() => update({ states: null })}>All states</Choice>{SERVICE_STATES.map(state => <Choice key={state} active={listParam(params, "states").includes(state)} onClick={() => toggle("states", state)}>{stateLabel(state)}{data ? ` ${data.summary[state] || 0}` : ""}</Choice>)}</div>
+              <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-gray-600 dark:text-gray-400">{loading ? "Updating report…" : data ? `${rows.length.toLocaleString()} devices${rows.length !== data.total ? ` of ${data.total.toLocaleString()}` : ""}` : ""}</span><input type="search" aria-label="Search devices" placeholder="Search devices…" value={deviceSearch} onChange={e => setDeviceSearch(e.target.value)} className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-white" /></div>
+              <div className="flex flex-wrap gap-2" aria-label="Service state filters"><Choice disabled={pending} active={!params.get("states")} onClick={() => update({ states: null })}>All states</Choice>{SERVICE_STATES.map(state => <Choice disabled={pending} key={state} active={listParam(params, "states").includes(state)} onClick={() => toggle("states", state)}>{stateLabel(state)}{data && view.evidence === "all" && view.checkin === "all" ? ` ${data.summary[state] || 0}` : ""}</Choice>)}</div>
+            </div>}
+            {hasQuery && <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-start justify-between gap-4">
+              <Choices label="Matching evidence">{EVIDENCE_CHOICES.filter(([key]) => hasApplication || key !== "applications").map(([value, label]) => <Choice disabled={pending} key={value} active={view.evidence === value} onClick={() => update({ evidence: value === "all" ? null : value })}>{label}</Choice>)}</Choices>
+              <details className="text-sm text-gray-600 dark:text-gray-300 max-w-xl"><summary className="cursor-pointer py-1">Columns</summary>
+                <div className="flex flex-wrap gap-2 mt-2" aria-label="Visible columns">{SERVICE_COLUMNS.filter(([key]) => key !== "deviceName" && (hasApplication || (key !== "applications" && key !== "applicationsCollectedAt"))).map(([key, label]) => <Choice disabled={pending} key={key} active={view.columns.includes(key)} onClick={() => toggleColumn(key)}>{label}</Choice>)}
+                  <button type="button" className="text-xs text-blue-600 dark:text-blue-400 hover:underline" disabled={pending} onClick={() => update({ columns: null, sort: null, direction: null })}>Reset columns</button>
+                </div><p className="text-xs mt-2">CSV includes all inventory and evidence fields, including hidden columns.</p>
+              </details>
+              {view.checkin !== "all" && <button type="button" onClick={() => update({ checkin: null })} className="text-xs text-blue-600 dark:text-blue-400">Check-in: {view.checkin} · {view.checkinAgeHours} hours ×</button>}
             </div>}
             {!hasQuery ? <div className="px-6 py-12 text-center text-gray-500 dark:text-gray-400"><p className="font-medium">Choose services from Selections to build your report.</p><p className="text-sm mt-2">Pick the collected services you want to compare. Results update as you select.</p></div>
               : loading ? <div role="status" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">Loading services report…{loadProgress && ` ${loadProgress}`}</div>
-              : data && <div className="overflow-x-auto">
-<table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-900/50"><tr>
-                    {["Device", "Service state", "Matching services", ...(hasApplication ? ["Application versions"] : []), "Inventory", "Service collection", "Last seen"].map(label => <th scope="col" key={label} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{label}</th>)}
-                  </tr></thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700 text-sm text-gray-900 dark:text-gray-100">
-                    {data.devices.length === 0 && <tr><td colSpan={hasApplication ? 7 : 6} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">No devices match these filters.</td></tr>}
-                    {data.devices.map(device => <tr key={device.serialNumber} className="align-top hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                      <td className="px-4 py-3 min-w-[190px]">
-                        <Link href={`/device/${encodeURIComponent(device.serialNumber)}?tab=system`} className="font-medium text-blue-600 dark:text-blue-400 hover:underline">{device.deviceName}</Link>
-                        {device.hostname && device.hostname !== device.deviceName && <div className="text-xs mt-1 text-gray-600 dark:text-gray-400">{device.hostname}</div>}
-                        <div className="font-mono text-xs text-gray-500 dark:text-gray-400 mt-1">{device.serialNumber}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{device.assetTag} {device.platform}</div>
-                      </td>
-                      <td className="px-4 py-3 min-w-[120px]"><Badge state={device.state} />
-                        {device.state === "unknown" && device.services.length > 0 && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Last reported: {stateLabel(device.reportedState)}</div>}
-                      </td>
-                      <td className="px-4 py-3 min-w-[230px] max-w-md">
-                        {device.services.length ? <div className="space-y-2">{device.services.map((service, index) => <div key={`${service.name}-${index}`}>
-                          <div className="flex flex-wrap items-center gap-2"><span className="font-mono text-xs break-all">{service.name || service.displayName || "Unnamed service"}</span><span className="text-xs text-gray-500 dark:text-gray-400">{service.status || "Unknown state"}</span></div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">{service.startType || (service.type ? `${service.type}${service.onDemand ? " · on demand" : ""}` : "Startup type unknown")}</div>
-                        </div>)}
-                          <details className="text-xs text-gray-500 dark:text-gray-400"><summary className="cursor-pointer">Executable paths</summary>{device.services.map((service, index) => <p key={index} className="font-mono break-all mt-1">{service.path || "Not reported"}</p>)}</details>
-                        </div> : <span className="text-gray-500 dark:text-gray-400">{device.state === "missing" ? "Not found in service inventory" : "No matching service reported; coverage unknown"}</span>}
-                      </td>
-                      {hasApplication && <td className="px-4 py-3 min-w-[180px] max-w-xs">
-                        <>
-                          {device.applications.length ? device.applications.map((app, index) => <div key={index} className="mb-2"><div className="text-xs text-gray-500 dark:text-gray-400">{app.name}</div><div className="font-mono">{app.version || "Version not reported"}</div></div>) : <span className="text-gray-500 dark:text-gray-400">No matching application reported</span>}
-                          <div className="text-xs text-gray-500 dark:text-gray-400"><When value={device.applicationsCollectedAt} />{device.applicationsFreshness !== "fresh" && ` · ${device.applicationsFreshness}`}</div>
-                        </>
-                      </td>}
-                      <td className="px-4 py-3 whitespace-nowrap"><div>{inventoryLabel(device.inventoryState)}</div>{device.archived && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Archived in ReportMate</div>}<div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{[device.catalog, device.usage, device.room].filter(Boolean).join(" · ")}</div></td>
-                      <td className="px-4 py-3 whitespace-nowrap"><When value={device.collectedAt} /><div className={`text-xs mt-1 ${device.freshness === "fresh" ? "text-gray-500 dark:text-gray-400" : "text-amber-700 dark:text-amber-300"}`}>{device.freshness === "fresh" ? "Within maximum age" : device.freshness === "stale" ? "Older than maximum age" : "Collection age unknown"}</div></td>
-                      <td className="px-4 py-3 whitespace-nowrap"><When value={device.lastSeen} /></td>
-                    </tr>)}
-                  </tbody>
-                </table>
-              </div>}
+              : data && <ServicesTable devices={rows} generatedAt={data.generatedAt} view={view} onSort={sortColumn} pending={pending} />}
           </div>
           <div className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Last collected local state; a running service does not prove vendor connectivity.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Last collected local state; matching evidence can be stale. Device check-in is ReportMate activity. A running service does not prove vendor connectivity.</p>
           </div>
         </div>
       </div>
