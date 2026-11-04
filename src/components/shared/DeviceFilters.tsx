@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { CollapsibleSection } from '../ui/CollapsibleSection'
 
 // Inventory YAMLs occasionally ship values with trailing commas/semicolons
@@ -17,6 +17,8 @@ export interface FilterOptions {
 }
 
 interface DeviceFiltersProps {
+  children?: ReactNode
+  additionalActiveCount?: number
   filterOptions: FilterOptions
   selectedStatuses: string[]
   selectedCatalogs: string[]
@@ -43,6 +45,8 @@ interface DeviceFiltersProps {
 }
 
 export default function DeviceFilters({
+  children,
+  additionalActiveCount = 0,
   filterOptions,
   selectedStatuses,
   selectedCatalogs,
@@ -65,7 +69,7 @@ export default function DeviceFilters({
   const filtersExpanded = externalExpanded !== undefined ? externalExpanded : internalExpanded
   const setFiltersExpanded = (val: boolean) => setInternalExpanded(val)
 
-  const totalActiveFilters = selectedStatuses.length + selectedCatalogs.length + selectedAreas.length +
+  const totalActiveFilters = additionalActiveCount + selectedStatuses.length + selectedCatalogs.length + selectedAreas.length +
     selectedLocations.length + selectedFleets.length + selectedUsages.length
 
   return (
@@ -110,6 +114,7 @@ export default function DeviceFilters({
       {/* Accordion Content */}
       <CollapsibleSection expanded={filtersExpanded}>
         <div className="px-6 pb-4">
+          {children}
           {/* Top row: short-pill dimensions share a single line. Catalog grows to fill the
               empty space to the right of Status/Usage (which have only 2-3 pills each). */}
           <div className="flex flex-wrap gap-x-8 gap-y-4">

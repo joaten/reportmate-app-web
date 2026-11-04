@@ -1,4 +1,4 @@
-import { listParam, servicesApiQuery, servicesUrlQuery } from './services'
+import { listParam, servicesApiQuery, servicesUrlQuery, serviceOptionsQuery } from './services'
 import { platformFromParam } from '../../providers/PlatformFilterProvider'
 
 it('preserves service, version, inventory, freshness and device scope in a shared request', () => {
@@ -32,4 +32,19 @@ it('removes cleared filters rather than retaining stale URL values', () => {
 
 it('recognizes an explicit all-platform link independently of stored preferences', () => {
   expect(platformFromParam('all')).toBe('all')
+})
+
+
+it('keeps selected names containing commas intact through a shared request', () => {
+  const names = ['Agent Service', 'Application (x64, English)']
+  const params = new URLSearchParams({ serviceNames: JSON.stringify(names), applicationNames: JSON.stringify(names) })
+  const shared = new URLSearchParams(servicesApiQuery(params, 'Windows'))
+  expect(listParam(shared, 'serviceNames')).toEqual(names)
+  expect(listParam(shared, 'applicationNames')).toEqual(names)
+})
+
+it('scopes available choices independently of the current service and report state', () => {
+  const query = new URLSearchParams(serviceOptionsQuery(new URLSearchParams('service=daemon&states=missing&catalogs=Shared&includeArchived=true'), 'macOS'))
+  expect([...query.keys()].sort()).toEqual(['catalogs', 'includeArchived', 'platform'])
+  expect(query.get('catalogs')).toBe('Shared')
 })

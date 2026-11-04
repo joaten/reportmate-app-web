@@ -1,9 +1,10 @@
 export const SERVICES_API = "/api/v1/system/services"
+export const SERVICE_OPTIONS_API = `${SERVICES_API}/filters`
 
 export const SERVICE_STATES = ["running", "stopped", "mixed", "missing", "unknown"] as const
 export const STARTUP_TYPES = ["automatic", "manual", "disabled", "boot", "system", "unknown"] as const
 export const SCOPE_KEYS = ["usages", "catalogs", "areas", "fleets", "locations", "rooms", "inventoryStates"] as const
-export const SERVICE_PARAMS = ["service", "application", "versions", "states", "startups", "freshness", "maxAgeHours", "search", ...SCOPE_KEYS, "includeArchived", "offset"] as const
+export const SERVICE_PARAMS = ["service", "application", "serviceNames", "applicationNames", "versions", "states", "startups", "freshness", "maxAgeHours", "search", ...SCOPE_KEYS, "includeArchived", "offset"] as const
 
 export type ServiceState = typeof SERVICE_STATES[number]
 export type Freshness = "fresh" | "stale" | "unknown"
@@ -57,8 +58,43 @@ export interface ServicesReport {
   devices: ServiceDevice[]
 }
 
+export interface ServiceCatalog {
+  services: { name: string; displayName: string | null; devices: number; startups: string[] }[]
+  applications: { name: string; devices: number; versions: string[] }[]
+  options: ServicesReport["options"]
+}
+
+export function serviceOptionsQuery(params: URLSearchParams, platform: string): string {
+  const query = new URLSearchParams({ platform })
+  for (const key of [...SCOPE_KEYS, "includeArchived"]) {
+    const value = params.get(key)
+    if (value) query.set(key, value)
+  }
+  return query.toString()
+}
+
+/** Older shared links use substring filters; resolve their visible selections from real inventory. */
+export function selectedServiceNames(params: URLSearchParams, catalog: ServiceCatalog | null): string[] {
+  if (params.has("serviceNames")) return listParam(params, "serviceNames")
+  const query = params.get("service")?.toLowerCase()
+  return query ? (catalog?.services || []).filter(s => `${s.name} ${s.displayName || ""}`.toLowerCase().includes(query)).map(s => s.name) : []
+}
+
+export function selectedApplicationNames(params: URLSearchParams, catalog: ServiceCatalog | null): string[] {
+  if (params.has("applicationNames")) return listParam(params, "applicationNames")
+  const query = params.get("application")?.toLowerCase()
+  return query ? (catalog?.applications || []).filter(a => a.name.toLowerCase().includes(query)).map(a => a.name) : []
+}
+
 export function listParam(params: URLSearchParams, key: string): string[] {
-  return (params.get(key) || "").split(",").map(value => value.trim()).filter(Boolean)
+  const value = params.get(key) || ""
+  if ((key === "serviceNames" || key === "applicationNames") && value.startsWith("[")) {
+    try {
+      const names: unknown = JSON.parse(value)
+      return Array.isArray(names) ? names.filter((name): name is string => typeof name === "string" && !!name.trim()) : []
+    } catch { return [] }
+  }
+  return value.split(",").map(part => part.trim()).filter(Boolean)
 }
 
 export function servicesApiQuery(params: URLSearchParams, platform: string): string {
