@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { usePlatformFilterSafe } from "../../providers/PlatformFilterProvider"
@@ -9,6 +9,7 @@ import { SystemViewSwitch } from "./SystemViewSwitch"
 import { ServiceSelectionCloud } from "./ServiceSelectionCloud"
 import { peekCached, rememberCached, trackedFetch } from "../../lib/data-cache"
 import { formatExactTime, formatRelativeTime } from "../../lib/time"
+import { collectServicesExport, servicesCsv } from "../../lib/system/services-export"
 import {
   SERVICES_API, SERVICE_OPTIONS_API, SERVICE_PARAMS, SERVICE_STATES, inventoryLabel, listParam,
   selectedApplicationNames, selectedServiceNames, serviceOptionsQuery, servicesApiQuery,
@@ -16,6 +17,8 @@ import {
 } from "../../lib/system/services"
 
 const button = "rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-40"
+const actionButton = "px-4 py-2 text-sm rounded-lg transition-colors whitespace-nowrap font-medium flex items-center gap-2 disabled:opacity-50"
+const secondaryAction = `${actionButton} bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white`
 const emptyOptions = { usages: [], catalogs: [], areas: [], fleets: [], locations: [], rooms: [], inventoryStates: [] }
 
 function When({ value }: { value: string | null }) {
@@ -60,6 +63,9 @@ export function ServicesReport() {
   const [expanded, setExpanded] = useState(!hasQuery)
   const [appPickerOpen, setAppPickerOpen] = useState(hasApplication)
   const [copied, setCopied] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState("")
+  const exportController = useRef<AbortController | null>(null)
   const searchValue = params.get("search") || ""
   const [deviceSearch, setDeviceSearch] = useState(searchValue)
   const serviceNames = selectedServiceNames(params, catalog)
@@ -69,6 +75,15 @@ export function ServicesReport() {
     .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
   const startupOptions = [...new Set((catalog?.services || []).filter(s => serviceNames.includes(s.name)).flatMap(s => s.startups))].sort()
   const options = catalog?.options || emptyOptions
+
+  useEffect(() => {
+    setExporting(false)
+    setExportProgress("")
+    return () => {
+      exportController.current?.abort()
+      exportController.current = null
+    }
+  }, [query, reload])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -149,6 +164,39 @@ export function ServicesReport() {
       setTimeout(() => setCopied(false), 2000)
     } catch { setError("Could not copy the link. Copy this page's address instead.") }
   }
+  const exportCsv = async () => {
+    const controller = new AbortController()
+    exportController.current = controller
+    setExporting(true)
+    setExportProgress("")
+    setError(null)
+    try {
+      const result = await collectServicesExport(query, controller.signal, (loaded, total) => {
+        if (!controller.signal.aborted) setExportProgress(`${loaded.toLocaleString()}/${total.toLocaleString()}`)
+      })
+      controller.signal.throwIfAborted()
+      const reportUrl = new URL(window.location.href)
+      reportUrl.searchParams.set("platform", platformFilter === "Windows" ? "win" : platformFilter === "macOS" ? "mac" : "all")
+      reportUrl.searchParams.delete("offset")
+      const blob = new Blob(["\uFEFF", servicesCsv(result.devices, result.generatedAt, reportUrl.toString())], { type: "text/csv;charset=utf-8;" })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `services-report-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (err) {
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "The report could not be exported.")
+    } finally {
+      if (exportController.current === controller) {
+        exportController.current = null
+        setExporting(false)
+        setExportProgress("")
+      }
+    }
+  }
   const activeCount = serviceNames.length + applicationNames.length + selectedVersions.length +
     listParam(params, "states").length + listParam(params, "startups").length + listParam(params, "inventoryStates").length +
     (params.has("freshness") ? 1 : 0) + (params.has("maxAgeHours") ? 1 : 0) + (params.has("includeArchived") ? 1 : 0)
@@ -168,7 +216,20 @@ export function ServicesReport() {
         <div className="flex-1 bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-lg flex flex-col min-h-0 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3">
             <div><SystemViewSwitch current="services" /><p className="text-sm text-gray-600 dark:text-gray-400 mt-2">Service coverage and installed versions across devices.</p></div>
-            <div className="flex items-center gap-2"><button type="button" onClick={copyLink} className={button}>{copied ? "Copied" : "Copy link"}</button><button type="button" onClick={() => setReload(n => n + 1)} disabled={loading} className={button}>Refresh</button></div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" onClick={copyLink} title="Copy a shareable link to this exact report" className={copied ? `${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white` : secondaryAction}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={copied ? "M5 13l4 4L19 7" : "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"} /></svg>
+                {copied ? "Link Copied" : "Copy Link"}
+              </button>
+              <button type="button" onClick={() => setReload(n => n + 1)} disabled={loading} className={secondaryAction}>
+                <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                Refresh
+              </button>
+              {!loading && data && data.total > 0 && <button type="button" onClick={exportCsv} disabled={exporting} title="Export all matching devices across every page" className={`${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white`}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                <span aria-live="polite">{exporting ? `Exporting${exportProgress ? ` ${exportProgress}` : "…"}` : "Export CSV"}</span>
+              </button>}
+            </div>
           </div>
           <div className="flex-1 overflow-auto min-h-0" aria-busy={loading}>
             <DeviceFilters filterOptions={{ ...options, statuses: [] }}
