@@ -59,6 +59,7 @@ ENV NEXT_PUBLIC_WPS_URL=${WPS_URL}
 ENV NEXT_PUBLIC_DEMO_MODE=${NEXT_PUBLIC_DEMO_MODE}
 
 # Build the app
+RUN node -e 'require("node:fs").writeFileSync("build-info.json", JSON.stringify({version:process.env.CONTAINER_IMAGE_TAG, imageTag:process.env.CONTAINER_IMAGE_TAG, buildId:process.env.BUILD_ID, buildTime:process.env.BUILD_TIME}))'
 RUN pnpm build
 
 # Production image, copy all the files and run next
@@ -105,6 +106,7 @@ RUN chown nextjs:nodejs .next
 # https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/build-info.json ./build-info.json
 
 USER nextjs
 

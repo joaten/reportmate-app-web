@@ -70,3 +70,4 @@ tailwindcss*.log
 # Lint and build caches — these embed absolute local paths
 .eslintcache
 lint-output.txt
+/build-info.json

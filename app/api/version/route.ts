@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
+import { resolveBuildInfo } from '@/src/lib/buildInfo'
 
 // Get version information from various sources
 function getVersionInfo() {
@@ -10,11 +11,10 @@ function getVersionInfo() {
   let imageTag = 'unknown'
   
   try {
-    // Try to get from environment variables first (prioritize container versions)
-    // CONTAINER_IMAGE_TAG is set by Terraform and contains the actual deployed image tag
+    // Runtime settings remain a fallback for development and older images.
     version = process.env.CONTAINER_IMAGE_TAG || process.env.NEXT_PUBLIC_VERSION || process.env.VERSION || process.env.DOCKER_TAG || 'unknown'
     buildId = process.env.BUILD_ID || process.env.NEXT_PUBLIC_BUILD_ID || process.env.GITHUB_SHA || 'unknown'
-    buildTime = process.env.BUILD_TIME || process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString()
+    buildTime = process.env.BUILD_TIME || process.env.NEXT_PUBLIC_BUILD_TIME || 'unknown'
     imageTag = process.env.CONTAINER_IMAGE_TAG || process.env.IMAGE_TAG || process.env.DOCKER_IMAGE_TAG || 'unknown'
     
     // Try to read from .next/BUILD_ID if available
@@ -58,11 +58,14 @@ function getVersionInfo() {
     console.warn('Error getting version info:', error)
   }
   
+  let imageInfo: unknown
+  try {
+    imageInfo = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'build-info.json'), 'utf8'))
+  } catch {
+    // Development and older images do not carry this build artifact.
+  }
   return {
-    version,
-    buildId,
-    buildTime,
-    imageTag,
+    ...resolveBuildInfo(imageInfo, { version, buildId, buildTime, imageTag }),
     nodeVersion: process.version,
     platform: process.platform,
     arch: process.arch
