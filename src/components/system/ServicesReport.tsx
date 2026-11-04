@@ -202,10 +202,10 @@ export function ServicesReport() {
                 <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 Refresh
               </button>
-              {!loading && data && rows.length > 0 && <button type="button" onClick={exportCsv} disabled={pending} title="Export all matching devices in this report" className={`${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white`}>
+              {!loading && data && rows.length > 0 && <div className="flex flex-col items-start gap-1 max-w-xs"><button type="button" onClick={exportCsv} disabled={pending} aria-describedby="services-export-details" title="Export all fields for the filtered devices" className={`${actionButton} bg-emerald-600 hover:bg-emerald-700 text-white`}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 Export CSV
-              </button>}
+              </button><p id="services-export-details" className="text-xs text-gray-500 dark:text-gray-400">CSV includes all inventory and evidence fields, including hidden columns, for the filtered devices.</p></div>}
             </div>
           </div>
           <div className="flex-1 overflow-auto min-h-0" aria-busy={loading}>
@@ -250,7 +250,7 @@ export function ServicesReport() {
               <details className="text-sm text-gray-600 dark:text-gray-300 max-w-xl"><summary className="cursor-pointer py-1">Columns</summary>
                 <div className="flex flex-wrap gap-2 mt-2" aria-label="Visible columns">{SERVICE_COLUMNS.filter(([key]) => key !== "deviceName" && (hasApplication || (key !== "applications" && key !== "applicationsCollectedAt"))).map(([key, label]) => <Choice disabled={pending} key={key} active={view.columns.includes(key)} onClick={() => toggleColumn(key)}>{label}</Choice>)}
                   <button type="button" className="text-xs text-blue-600 dark:text-blue-400 hover:underline" disabled={pending} onClick={() => update({ columns: null, sort: null, direction: null })}>Reset columns</button>
-                </div><p className="text-xs mt-2">CSV includes all inventory and evidence fields, including hidden columns.</p>
+                </div>
               </details>
               {view.checkin !== "all" && <button type="button" onClick={() => update({ checkin: null })} className="text-xs text-blue-600 dark:text-blue-400">Check-in: {view.checkin} · {view.checkinAgeHours} hours ×</button>}
             </div>}
