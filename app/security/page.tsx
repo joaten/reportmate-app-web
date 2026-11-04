@@ -30,6 +30,7 @@ import { cachedAt, peekCached, rememberCached, trackedFetch } from "@/src/lib/da
 import { RefreshErrorBanner } from "@/src/components/ui/RefreshErrorBanner"
 import { SkeletonTimeout } from "@/src/components/ui/SkeletonTimeout"
 import { csvCell } from "@/src/lib/csv"
+import { ArcticWolfReport } from "@/src/components/security/ArcticWolfReport"
 
 const SECURITY_URL = '/api/v1/security'
 
@@ -934,7 +935,10 @@ function SecurityPageContent() {
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Fleet Security</h2>
+                <div className="flex flex-wrap items-center gap-4">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Fleet Security</h2>
+                  <Link href={`/security?tab=arctic-wolf&platform=${searchParams.get('platform') || 'all'}`} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Arctic Wolf Inventory</Link>
+                </div>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                   Security posture across {filteredDevices.length} device{filteredDevices.length !== 1 ? 's' : ''}
                 </p>
@@ -1428,10 +1432,15 @@ function SecurityPageContent() {
   )
 }
 
+function SecurityReportContent() {
+  const params = useSearchParams()
+  return params.get('tab') === 'arctic-wolf' ? <ArcticWolfReport /> : <SecurityPageContent />
+}
+
 export default function SecurityPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-black animate-pulse"></div>}>
-      <SecurityPageContent />
+      <SecurityReportContent />
     </Suspense>
   )
 }
